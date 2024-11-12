@@ -21,7 +21,7 @@ def load_policy_data():
 # Load and preprocess the transaction data
 @st.cache
 def preprocess_transactions(transactions_df):
-    transactions_df['date'] = pd.to_datetime(transactions_df['date'])
+    transactions_df['date'] = pd.to_datetime(transactions_df['date'], errors='coerce')
     transactions_df['month'] = transactions_df['date'].dt.month
     monthly_spend = transactions_df.groupby(['user ID', 'month'])['amount'].sum().unstack(fill_value=0)
     category_spend = transactions_df.groupby(['user ID', 'category'])['amount'].sum().unstack(fill_value=0)
@@ -32,11 +32,21 @@ def preprocess_transactions(transactions_df):
 def preprocess_policy_data(policies_df):
     le_type = LabelEncoder()
     le_liquidity = LabelEncoder()
+    
+    # Encode categorical columns
     policies_df['Policy Type'] = le_type.fit_transform(policies_df['Policy Type'])
     policies_df['Liquidity'] = le_liquidity.fit_transform(policies_df['Liquidity'])
+    
+    # Select features and label
     X = policies_df[['Risk Level', 'Expected ROI', 'Investment Horizon', 'Liquidity', 'Minimum Investment', 
                      'Historical 1-Year Return', 'Volatility', 'Sharpe Ratio', 'Max Drawdown']]
     y = policies_df['Policy Name']
+    
+    # Check and handle missing or non-numeric values in X
+    X = X.apply(pd.to_numeric, errors='coerce')  # Convert non-numeric values to NaN
+    if X.isnull().values.any():
+        X = X.fillna(0)  # Fill any NaN values that remain with 0
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     return X_scaled, y, scaler, le_type, le_liquidity
@@ -80,7 +90,7 @@ if uploaded_file is not None:
     st.write(spending_summary)
 
 # Preprocess user input for prediction
-def process_user_inputs(risk_level, investment_horizon, expected_roi, liquidity_pref, scaler, le_type, le_liquidity):
+def process_user_inputs(risk_level, investment_horizon, expected_roi, liquidity_pref, scaler, le_liquidity):
     liquidity_encoded = le_liquidity.transform([liquidity_pref])[0]
     input_features = np.array([[risk_level, expected_roi, investment_horizon, liquidity_encoded, 
                                 spending_summary.sum().sum() if uploaded_file else 0,
@@ -91,7 +101,7 @@ def process_user_inputs(risk_level, investment_horizon, expected_roi, liquidity_
 # Make recommendations
 if st.button("Get Policy Recommendations"):
     input_features_scaled = process_user_inputs(risk_level, investment_horizon, expected_roi, 
-                                                liquidity_pref, scaler, le_type, le_liquidity)
+                                                liquidity_pref, scaler, le_liquidity)
     
     model = joblib.load("policy_recommendation_model.pkl")
     recommended_policy = model.predict(input_features_scaled)[0]
